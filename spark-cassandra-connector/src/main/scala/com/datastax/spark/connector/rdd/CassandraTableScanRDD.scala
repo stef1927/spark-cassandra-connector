@@ -191,8 +191,7 @@ class CassandraTableScanRDD[R] private[connector](
     if (selectedColumnNames.containsAll(partitionKeyColumnNames)) {
       val partitioner = partitionGenerator.partitioner[K](columns)
       logDebug(
-        s"""Made partitioner ${partitioner.get} with
-           |selector ${partitioner.get.keyMapping} for $this""".stripMargin)
+        s"""Made partitioner ${partitioner} with for $this""".stripMargin)
       convertTo[(K, R)].withPartitioner(partitioner)
 
     } else {
