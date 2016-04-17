@@ -196,6 +196,11 @@ OSS Cassandra this should never be used.</td>
   <td>Number of CQL rows fetched per driver request</td>
 </tr>
 <tr>
+  <td><code>input.join.concurrent.reads</code></td>
+  <td>5</td>
+  <td>Maximum number of ongoing async requests to Cassandra per executor while joining RDD with Cassandra table</td>
+</tr>
+<tr>
   <td><code>input.metrics</code></td>
   <td>true</td>
   <td>Sets whether to record connector specific metrics on write</td>

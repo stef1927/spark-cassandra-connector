@@ -1,3 +1,5 @@
+ * Use executeAsync while joining with C* table (SPARKC-233)
+
 1.6.0 M2
  * Performance improvement: keyBy creates an RDD with CassandraPartitioner 
    so shuffling can be avoided in many cases, e.g. when keyBy is followed
