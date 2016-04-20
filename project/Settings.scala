@@ -67,9 +67,8 @@ object Settings extends Build {
   val cassandraTestVersion = sys.props.get("test.cassandra.version").getOrElse(Versions.Cassandra)
 
   lazy val TEST_JAVA_OPTS = Seq(
-    "-XX:MaxPermSize=256M",
-    "-Xms256m",
-    "-Xmx512m",
+    "-Xms1024m",
+    "-Xmx2048m",
     "-Dsun.io.serialization.extendedDebugInfo=true",
     s"-DbaseDir=${mainDir.getAbsolutePath}") ++ uRandomParams
 
