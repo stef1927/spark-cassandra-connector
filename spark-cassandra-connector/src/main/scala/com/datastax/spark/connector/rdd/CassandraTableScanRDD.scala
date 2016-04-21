@@ -292,19 +292,33 @@ class CassandraTableScanRDD[R] private[connector](
   private def fetchTokenRange(
     session: Session,
     range: CqlTokenRange[_, _],
-    inputMetricsUpdater: InputMetricsUpdater): Iterator[R] = {
+    inputMetricsUpdater: InputMetricsUpdater,
+    streamingEnabled: Boolean): Iterator[R] = {
 
     val (cql, values) = tokenRangeToCqlQuery(range)
     logDebug(
       s"Fetching data for range ${range.cql(partitionKeyStr)} " +
         s"with $cql " +
-        s"with params ${values.mkString("[", ",", "]")}")
+        s"with params ${values.mkString("[", ",", "]")} " +
+        s"with streaming set to $streamingEnabled")
     val stmt = createStatement(session, cql, values: _*)
     val columnNamesArray = selectedColumnRefs.map(_.selectedAs).toArray
 
     try {
-      val rs = session.execute(stmt)
-      val iterator = new PrefetchingResultSetIterator(rs, fetchSize)
+      val iterator =
+        if (streamingEnabled) {
+          //we should really set the routing token range also when streaming is disabled
+          //but I wanted to verify I could get the results as in the first run of tests
+          //note that spark doesn't necessarily send jobs to the preferred location so
+          //when we are not streaming we don't necessarily contact the right replicas
+          //since we have no partition key for token queries
+          stmt.setRoutingTokenRange(range.routing(session.getCluster.getMetadata))
+          new StreamingResultSetIterator(session.stream(stmt))
+        }
+        else {
+          new PrefetchingResultSetIterator(session.execute(stmt), fetchSize)
+        }
+
       val iteratorWithMetrics = iterator.map(inputMetricsUpdater.updateMetrics)
       val result = iteratorWithMetrics.map(rowReader.read(_, columnNamesArray))
       logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained successfully.")
@@ -316,16 +330,18 @@ class CassandraTableScanRDD[R] private[connector](
   }
 
   override def compute(split: Partition, context: TaskContext): Iterator[R] = {
-    val session = connector.openSession()
+
     val partition = split.asInstanceOf[CassandraPartition[_, _]]
+    val replicas = partition.endpoints.flatMap(nodeAddresses.hostNames).toSeq
     val tokenRanges = partition.tokenRanges
     val metricsUpdater = InputMetricsUpdater(context, readConf)
+    val session = connector.openSession()
 
     // Iterator flatMap trick flattens the iterator-of-iterator structure into a single iterator.
     // flatMap on iterator is lazy, therefore a query for the next token range is executed not earlier
     // than all of the rows returned by the previous query have been consumed
     val rowIterator = tokenRanges.iterator.flatMap(
-      fetchTokenRange(session, _: CqlTokenRange[_, _], metricsUpdater))
+      fetchTokenRange(session, _: CqlTokenRange[_, _], metricsUpdater, readConf.streamingEnabled))
     val countingIterator = new CountingIterator(rowIterator, limit)
 
     context.addTaskCompletionListener { (context) =>

@@ -14,7 +14,9 @@ import com.google.common.util.concurrent.{ListenableFuture, FutureCallback, Futu
   *                           initiates fetching the next page
   * @param timer a Codahale timer to optionally gather the metrics of fetching time
   */
-class PrefetchingResultSetIterator(resultSet: ResultSet, prefetchWindowSize: Int, timer: Option[Timer] = None) extends Iterator[Row] {
+class PrefetchingResultSetIterator(resultSet: ResultSet,
+                                   prefetchWindowSize: Int,
+                                   timer: Option[Timer] = None) extends Iterator[Row] {
 
   private[this] val iterator = resultSet.iterator()
 
