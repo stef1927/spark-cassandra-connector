@@ -13,6 +13,7 @@ import com.datastax.spark.connector.util.Quote._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{Partition, TaskContext}
 
+import scala.collection.JavaConversions._
 import scala.reflect.ClassTag
 
 /**
@@ -235,12 +236,18 @@ class CassandraJoinRDD[L, R] private[connector](
     bsb: BoundStatementBuilder[L],
     lastIt: Iterator[L]): Iterator[(L, R)] = {
 
-    val columnNamesArray = selectedColumnRefs.map(_.selectedAs).toArray
     for (leftSide <- lastIt;
          rightSide <- {
            val rs = session.execute(bsb.bind(leftSide))
            val iterator = new PrefetchingResultSetIterator(rs, fetchSize)
-           iterator.map(rowReader.read(_, columnNamesArray))
+           val columnDefs = rs.getColumnDefinitions
+           val columnNamesArray = columnDefs.iterator.map(_.getName).toArray
+           val codecRegistry = session.getCluster.getConfiguration.getCodecRegistry
+           val codecsArray = columnDefs.iterator
+             .map(_.getType)
+             .map(t => codecRegistry.codecFor[AnyRef](t))
+             .toArray
+           iterator.map(rowReader.read(_, columnNamesArray, codecsArray))
          }) yield (leftSide, rightSide)
   }
 

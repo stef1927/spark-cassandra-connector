@@ -53,17 +53,27 @@ class LocalNodeFirstLoadBalancingPolicy(contactPoints: Set[InetAddress], localDC
     sortNodesByStatusAndProximity(contactPoints, nodes).iterator
   }
 
-  private def findReplicas(keyspace: String, partitionKey: ByteBuffer): Set[Host] = {
-    clusterMetadata.getReplicas(Metadata.quote(keyspace), partitionKey).toSet
-      .filter(host => host.isUp && distance(host) != HostDistance.IGNORED)
+  private def findReplicas(keyspace: String, statement: Statement): Set[Host] = {
+    val pk = statement.getRoutingKey(ProtocolVersion.NEWEST_SUPPORTED, CodecRegistry.DEFAULT_INSTANCE)
+    val range = statement.getRoutingTokenRange
+
+    assert(keyspace != null)
+    assert(pk != null || range != null)
+
+    if (range != null) {
+      filterReplicas(clusterMetadata.getReplicas(keyspace, range).toSet)
+    }
+    else {
+      filterReplicas(clusterMetadata.getReplicas(Metadata.quote(keyspace), pk).toSet)
+    }
+  }
+
+  private def filterReplicas(replicas: Set[Host]): Set[Host] = {
+    replicas.filter(host => host.isUp && distance(host) != HostDistance.IGNORED)
   }
 
   private def tokenAwareQueryPlan(keyspace: String, statement: Statement): JIterator[Host] = {
-    assert(keyspace != null)
-    assert(statement.getRoutingKey(ProtocolVersion.NEWEST_SUPPORTED, CodecRegistry.DEFAULT_INSTANCE) != null)
-
-    val replicas = findReplicas(keyspace,
-      statement.getRoutingKey(ProtocolVersion.NEWEST_SUPPORTED, CodecRegistry.DEFAULT_INSTANCE))
+    val replicas = findReplicas(keyspace, statement)
     val (localReplica, otherReplicas) = replicas.partition(isLocalHost)
     lazy val maybeShuffled = if (shuffleReplicas) random.shuffle(otherReplicas.toIndexedSeq) else otherReplicas
 
@@ -76,7 +86,8 @@ class LocalNodeFirstLoadBalancingPolicy(contactPoints: Set[InetAddress], localDC
   override def newQueryPlan (loggedKeyspace: String, statement: Statement): JIterator[Host] = {
     val keyspace = if (statement.getKeyspace == null) loggedKeyspace else statement.getKeyspace
 
-    if (statement.getRoutingKey(ProtocolVersion.NEWEST_SUPPORTED, CodecRegistry.DEFAULT_INSTANCE) == null || keyspace == null)
+    if ((statement.getRoutingKey(ProtocolVersion.NEWEST_SUPPORTED, CodecRegistry.DEFAULT_INSTANCE) == null &&
+         statement.getRoutingTokenRange == null) || keyspace == null)
       tokenUnawareQueryPlan(keyspace, statement)
     else
       tokenAwareQueryPlan(keyspace, statement)

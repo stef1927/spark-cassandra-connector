@@ -2,6 +2,7 @@ package com.datastax.spark.connector.rdd.partitioner
 
 import java.net.InetAddress
 
+import com.datastax.driver.core.Metadata
 import org.apache.spark.Partition
 
 import com.datastax.spark.connector.rdd.partitioner.dht.{Token, TokenFactory, TokenRange}
@@ -10,6 +11,12 @@ import com.datastax.spark.connector.rdd.partitioner.dht.{Token, TokenFactory, To
 case class CqlTokenRange[V, T <: Token[V]](range: TokenRange[V, T])(implicit tf: TokenFactory[V, T]) {
 
   require(!range.isWrappedAround)
+
+  def routing(metadata: Metadata): com.datastax.driver.core.TokenRange = {
+    val start = metadata.newToken(range.start.toString)
+    val end = metadata.newToken(range.end.toString)
+    metadata.newTokenRange(start, end)
+  }
 
   def cql(pk: String): (String, Seq[Any]) =
     if (range.start == tf.minToken)

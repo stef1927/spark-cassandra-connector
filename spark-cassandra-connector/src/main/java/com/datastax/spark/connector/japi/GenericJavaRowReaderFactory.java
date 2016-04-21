@@ -1,6 +1,7 @@
 package com.datastax.spark.connector.japi;
 
 import com.datastax.driver.core.Row;
+import com.datastax.driver.core.TypeCodec;
 import com.datastax.spark.connector.ColumnRef;
 import com.datastax.spark.connector.cql.TableDef;
 import com.datastax.spark.connector.rdd.reader.RowReader;
@@ -31,10 +32,10 @@ public class GenericJavaRowReaderFactory {
         }
 
         @Override
-        public CassandraRow read(Row row, String[] columnNames) {
+        public CassandraRow read(Row row, String[] columnNames, TypeCodec[] codecs) {
             assert row.getColumnDefinitions().size() == columnNames.length :
                     "Number of columns in a row must match the number of columns in the table metadata";
-            return CassandraRow$.MODULE$.fromJavaDriverRow(row, columnNames);
+            return CassandraRow$.MODULE$.fromJavaDriverRow(row, columnNames, codecs);
         }
 
         @Override

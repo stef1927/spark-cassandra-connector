@@ -80,11 +80,16 @@ object InputMetricsUpdater {
     private var cnt = 0
     private var dataLength = 0
 
-    def getRowBinarySize(row: Row) = {
-      var size = 0
-      for (i <- 0 until row.getColumnDefinitions.size() if !row.isNull(i))
-        size += row.getBytesUnsafe(i).remaining()
-      size
+    // Performance impact: calling getValue() on a driver row is very slow for some reason
+    // I've changed this method to avoid calling isNull(), which in turn calls getValue()
+    // However this s not enough: disabling metrics reduced running time from 12 to 9.5 seconds for 5M rows,
+    // so we must find a way to calculate the row size for free: the driver knows the length of the
+    // BBs so it could store it for us or we must calculate it during type conversion
+    def getRowBinarySize(row: Row): Int = {
+      (0 until row.getColumnDefinitions.size())
+                  .map(i => row.getBytesUnsafe(i))
+                  .collect({case bb if bb != null => bb.remaining()})
+                  .sum
     }
 
     override def updateMetrics(row: Row): Row = {

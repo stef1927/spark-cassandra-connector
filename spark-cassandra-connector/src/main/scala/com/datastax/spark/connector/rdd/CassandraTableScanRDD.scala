@@ -269,7 +269,7 @@ class CassandraTableScanRDD[R] private[connector](
     (queryTemplate, queryParamValues)
   }
 
-  private def createStatement(session: Session, cql: String, values: Any*): Statement = {
+  private def createStatement(session: Session, cql: String, values: Any*): BoundStatement = {
     try {
       val stmt = session.prepare(cql)
       stmt.setConsistencyLevel(consistencyLevel)
@@ -289,26 +289,53 @@ class CassandraTableScanRDD[R] private[connector](
     }
   }
 
+  private def convertRows(iterator: Iterator[Row],
+                          session: Session): Iterator[R] = {
+    val firstRow = iterator.next()
+    val columnDefs = firstRow.getColumnDefinitions
+    val columnNamesArray = columnDefs.iterator.map(_.getName).toArray
+    val codecRegistry = session.getCluster.getConfiguration.getCodecRegistry
+    val codecsArray = columnDefs.iterator
+      .map(_.getType)
+      .map(t => codecRegistry.codecFor[AnyRef](t))
+      .toArray
+
+    (Seq(firstRow).iterator ++ iterator).map(rowReader.read(_, columnNamesArray, codecsArray))
+  }
+
   private def fetchTokenRange(
     session: Session,
     range: CqlTokenRange[_, _],
-    inputMetricsUpdater: InputMetricsUpdater): Iterator[R] = {
+    inputMetricsUpdater: InputMetricsUpdater,
+    streamingEnabled: Boolean): Iterator[R] = {
 
     val (cql, values) = tokenRangeToCqlQuery(range)
     logDebug(
       s"Fetching data for range ${range.cql(partitionKeyStr)} " +
         s"with $cql " +
-        s"with params ${values.mkString("[", ",", "]")}")
+        s"with params ${values.mkString("[", ",", "]")} " +
+        s"with streaming set to $streamingEnabled")
     val stmt = createStatement(session, cql, values: _*)
-    val columnNamesArray = selectedColumnRefs.map(_.selectedAs).toArray
+    stmt.setRoutingTokenRange(range.routing(session.getCluster.getMetadata))
 
     try {
-      val rs = session.execute(stmt)
-      val iterator = new PrefetchingResultSetIterator(rs, fetchSize)
-      val iteratorWithMetrics = iterator.map(inputMetricsUpdater.updateMetrics)
-      val result = iteratorWithMetrics.map(rowReader.read(_, columnNamesArray))
-      logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained successfully.")
-      result
+      val iterator =
+        if (streamingEnabled) {
+          new StreamingResultSetIterator(session.stream(stmt))
+        }
+        else {
+          new PrefetchingResultSetIterator(session.execute(stmt), fetchSize)
+        }
+
+      if (iterator.isEmpty) {
+        logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained empty.")
+        Seq[R]().iterator
+      }
+      else {
+        val iteratorWithMetrics = iterator.map(inputMetricsUpdater.updateMetrics)
+        logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained successfully.")
+        convertRows(iteratorWithMetrics, session)
+      }
     } catch {
       case t: Throwable =>
         throw new IOException(s"Exception during execution of $cql: ${t.getMessage}", t)
@@ -316,16 +343,18 @@ class CassandraTableScanRDD[R] private[connector](
   }
 
   override def compute(split: Partition, context: TaskContext): Iterator[R] = {
-    val session = connector.openSession()
+
     val partition = split.asInstanceOf[CassandraPartition[_, _]]
+    val replicas = partition.endpoints.flatMap(nodeAddresses.hostNames).toSeq
     val tokenRanges = partition.tokenRanges
     val metricsUpdater = InputMetricsUpdater(context, readConf)
+    val session = connector.openSession()
 
     // Iterator flatMap trick flattens the iterator-of-iterator structure into a single iterator.
     // flatMap on iterator is lazy, therefore a query for the next token range is executed not earlier
     // than all of the rows returned by the previous query have been consumed
     val rowIterator = tokenRanges.iterator.flatMap(
-      fetchTokenRange(session, _: CqlTokenRange[_, _], metricsUpdater))
+      fetchTokenRange(session, _: CqlTokenRange[_, _], metricsUpdater, readConf.streamingEnabled))
     val countingIterator = new CountingIterator(rowIterator, limit)
 
     context.addTaskCompletionListener { (context) =>

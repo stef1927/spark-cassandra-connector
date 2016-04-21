@@ -1,6 +1,6 @@
 package com.datastax.spark.connector
 
-import com.datastax.driver.core.Row
+import com.datastax.driver.core.{TypeCodec, Row}
 
 /** Represents a single row fetched from Cassandra.
   * Offers getters to read individual fields by column name or column index.
@@ -90,6 +90,15 @@ object CassandraRow {
     val data = new Array[Object](columnNames.length)
     for (i <- columnNames.indices)
       data(i) = GettableData.get(row, i)
+    new CassandraRow(columnNames, data)
+  }
+
+  def fromJavaDriverRow(row: Row,
+                        columnNames: Array[String],
+                        codecs: Array[TypeCodec[AnyRef]]): CassandraRow = {
+    val data = new Array[Object](columnNames.length)
+    for (i <- columnNames.indices)
+      data(i) = GettableData.get(row, i, codecs(i))
     new CassandraRow(columnNames, data)
   }
 
