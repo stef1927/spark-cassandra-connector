@@ -250,9 +250,8 @@ class CassandraJoinRDD[L, R] private[connector](
       val queryFuture = session.executeAsync(bsb.bind(left))
       Futures.addCallback(queryFuture, new FutureCallback[ResultSet] {
         def onSuccess(rs: ResultSet) {
-          val resultSet = new PrefetchingResultSetIterator(rs, fetchSize)
-          val columnMetaData = CassandraRowMetadata.fromResultSet(columnNames,rs);
-          val rightSide = resultSet.map(rowReader.read(_, columnMetaData))
+          val resultSet = new PrefetchingResultSetIterator(columnNames, rs, fetchSize)
+          val rightSide = resultSet.map(rowReader.read(_, resultSet.metadata))
           resultFuture.set(leftSide.zip(rightSide))
         }
         def onFailure(throwable: Throwable) {
