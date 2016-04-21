@@ -273,7 +273,7 @@ class CassandraTableScanRDD[R] private[connector](
     (queryTemplate, queryParamValues)
   }
 
-  private def createStatement(session: Session, cql: String, values: Any*): Statement = {
+  private def createStatement(session: Session, cql: String, values: Any*): BoundStatement = {
     try {
       val stmt = session.prepare(cql)
       stmt.setConsistencyLevel(consistencyLevel)
@@ -296,25 +296,45 @@ class CassandraTableScanRDD[R] private[connector](
   private def fetchTokenRange(
     session: Session,
     range: CqlTokenRange[_, _],
-    inputMetricsUpdater: InputMetricsUpdater): Iterator[R] = {
+    inputMetricsUpdater: InputMetricsUpdater,
+    readConf: ReadConf): Iterator[R] = {
 
+    val asyncPagingEnabled = readConf.asyncPagingEnabled
+    val asyncPagingMaxPagesSecond = readConf.asyncPagingMaxPagesSecond
     val (cql, values) = tokenRangeToCqlQuery(range)
     logDebug(
       s"Fetching data for range ${range.cql(partitionKeyStr)} " +
         s"with $cql " +
-        s"with params ${values.mkString("[", ",", "]")}")
+        s"with params ${values.mkString("[", ",", "]")} " +
+        s"with async paging set to $asyncPagingEnabled and" +
+        s"max pages per second $asyncPagingMaxPagesSecond")
     val stmt = createStatement(session, cql, values: _*)
+    stmt.setRoutingTokenRange(range.routing(session.getCluster.getMetadata))
 
     try {
-      val rs = session.execute(stmt)
-      val columnNames = selectedColumnRefs.map(_.selectedAs).toIndexedSeq
-      val columnMetaData = CassandraRowMetadata.fromResultSet(columnNames,rs)
+      val iterator =
+        if (asyncPagingEnabled) {
+          val pagingOptions = AsyncPagingOptions.create(fetchSize,
+            AsyncPagingOptions.PageUnit.ROWS, 0, asyncPagingMaxPagesSecond)
+          new MultiPageResultSetIterator(session.executeAsync(stmt, pagingOptions))
+        }
+        else {
+          new PrefetchingResultSetIterator(session.execute(stmt), fetchSize)
+        }
 
-      val iterator = new PrefetchingResultSetIterator(rs, fetchSize)
-      val iteratorWithMetrics = iterator.map(inputMetricsUpdater.updateMetrics)
-      val result = iteratorWithMetrics.map(rowReader.read(_, columnMetaData))
-      logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained successfully.")
-      result
+      if (iterator.resultSet.isEmpty) {
+        logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} is empty.")
+        Iterator.empty
+      }
+      else {
+        val columnNames = selectedColumnRefs.map(_.selectedAs).toIndexedSeq
+        val columnMetaData = CassandraRowMetadata.fromResultSet(columnNames, iterator.resultSet.get)
+
+        val iteratorWithMetrics = iterator.map(inputMetricsUpdater.updateMetrics)
+        val result = iteratorWithMetrics.map(rowReader.read(_, columnMetaData))
+        logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained successfully.")
+        result
+      }
     } catch {
       case t: Throwable =>
         throw new IOException(s"Exception during execution of $cql: ${t.getMessage}", t)
@@ -331,7 +351,7 @@ class CassandraTableScanRDD[R] private[connector](
     // flatMap on iterator is lazy, therefore a query for the next token range is executed not earlier
     // than all of the rows returned by the previous query have been consumed
     val rowIterator = tokenRanges.iterator.flatMap(
-      fetchTokenRange(session, _: CqlTokenRange[_, _], metricsUpdater))
+      fetchTokenRange(session, _: CqlTokenRange[_, _], metricsUpdater, readConf))
     val countingIterator = new CountingIterator(rowIterator, limit)
 
     context.addTaskCompletionListener { (context) =>

@@ -1,6 +1,6 @@
 package com.datastax.spark.connector
 
-import com.datastax.driver.core.{CodecRegistry, ResultSet, Row, TypeCodec}
+import com.datastax.driver.core._
 
 /** Represents a single row fetched from Cassandra.
   * Offers getters to read individual fields by column name or column index.

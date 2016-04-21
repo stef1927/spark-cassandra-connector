@@ -14,14 +14,17 @@ import org.apache.spark.SparkConf
   *                         higher consistency level will disable data-locality
   * @param taskMetricsEnabled whether or not enable task metrics updates (requires Spark 1.2+)
   * @param throughputJoinQueryPerSec maximum read throughput allowed per single core in query/s while
-  *                                  joining a RDD with C* table (joinWithCassandraTable operation)*/
+  *                                  joining a RDD with C* table (joinWithCassandraTable operation)
+  * @param asyncPagingEnabled whether to use asynchronous paging when fetching data */
 case class ReadConf(
   splitCount: Option[Int] = None,
   splitSizeInMB: Int = ReadConf.SplitSizeInMBParam.default,
   fetchSizeInRows: Int = ReadConf.FetchSizeInRowsParam.default,
   consistencyLevel: ConsistencyLevel = ReadConf.ConsistencyLevelParam.default,
   taskMetricsEnabled: Boolean = ReadConf.TaskMetricParam.default,
-  throughputJoinQueryPerSec: Long = ReadConf.ThroughputJoinQueryPerSecParam.default
+  throughputJoinQueryPerSec: Long = ReadConf.ThroughputJoinQueryPerSecParam.default,
+  asyncPagingEnabled: Boolean = ReadConf.AsyncPagingEnabledParam.default,
+  asyncPagingMaxPagesSecond: Int = ReadConf.AsyncPagingMaxPagesSecondParam.default
 )
 
 
@@ -60,13 +63,29 @@ object ReadConf {
     description =
       "Maximum read throughput allowed per single core in query/s while joining RDD with C* table")
 
+  val AsyncPagingEnabledParam = ConfigParameter[Boolean](
+    name = "spark.cassandra.input.async.paging.enabled",
+    section = ReferenceSection,
+    default = false,
+    description = """Sets whether to use async paging for fetching data (experimental)"""
+  )
+
+  val AsyncPagingMaxPagesSecondParam = ConfigParameter[Int](
+    name = "spark.cassandra.input.async.paging.max_pages_second",
+    section = ReferenceSection,
+    default = 0,
+    description = """Sets the maximum number of pages per second when using async paging (experimental)"""
+  )
+
   // Whitelist for allowed Read environment variables
   val Properties = Set(
     SplitSizeInMBParam,
     FetchSizeInRowsParam,
     ConsistencyLevelParam,
     TaskMetricParam,
-    ThroughputJoinQueryPerSecParam
+    ThroughputJoinQueryPerSecParam,
+    AsyncPagingEnabledParam,
+    AsyncPagingMaxPagesSecondParam
   )
 
   def fromSparkConf(conf: SparkConf): ReadConf = {
@@ -78,8 +97,9 @@ object ReadConf {
       splitSizeInMB = conf.getInt(SplitSizeInMBParam.name, SplitSizeInMBParam.default),
       consistencyLevel = ConsistencyLevel.valueOf(conf.get(ConsistencyLevelParam.name, ConsistencyLevelParam.default.name)),
       taskMetricsEnabled = conf.getBoolean(TaskMetricParam.name, TaskMetricParam.default),
-      throughputJoinQueryPerSec = conf.getLong(ThroughputJoinQueryPerSecParam.name,
-        ThroughputJoinQueryPerSecParam.default)
+      throughputJoinQueryPerSec = conf.getLong(ThroughputJoinQueryPerSecParam.name, ThroughputJoinQueryPerSecParam.default),
+      asyncPagingEnabled = conf.getBoolean(AsyncPagingEnabledParam.name, AsyncPagingEnabledParam.default),
+      asyncPagingMaxPagesSecond = conf.getInt(AsyncPagingMaxPagesSecondParam.name, AsyncPagingMaxPagesSecondParam.default)
     )
   }
 
