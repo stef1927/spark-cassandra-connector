@@ -129,13 +129,14 @@ private[connector] class GettableDataToMappedTypeConverter[T : TypeTag : ColumnM
   }
 
   /** Tries to convert the value with the given converter and handles the error, if any */
-  private def tryConvert(value: AnyRef, converter: TypeConverter[_], name: String): AnyRef = {
+  private def tryConvert(value: AnyRef, converter: TypeConverter[_], name: () => String): AnyRef = {
     try
       converter.convert(value).asInstanceOf[AnyRef]
     catch {
       case e: Exception =>
+        val n = name()
         throw new TypeConversionException(
-          s"Failed to convert column $name " +
+          s"Failed to convert column $n " +
             s"of ${structDef.name} " +
             s"to ${converter.targetTypeName}: $value", e)
     }
@@ -143,10 +144,11 @@ private[connector] class GettableDataToMappedTypeConverter[T : TypeTag : ColumnM
 
   /** Throws NPE if value is null when it is not allowed to.
     * The `ColumnMapper` decides whether it is allowed or not. */
-  private def checkNotNull(value: AnyRef, name: String): AnyRef = {
+  private def checkNotNull(value: AnyRef, name: () => String): AnyRef = {
     if (!columnMap.allowsNull && value == null) {
+      val n = name()
       throw new scala.NullPointerException(
-        s"Unexpected null value of column $name in ${structDef.name}." +
+        s"Unexpected null value of column $n in ${structDef.name}." +
           "If you want to receive null values from Cassandra, please wrap the column type into Option " +
           "or use JavaBeanColumnMapper")
     }
@@ -160,7 +162,7 @@ private[connector] class GettableDataToMappedTypeConverter[T : TypeTag : ColumnM
       converter: TypeConverter[_]): AnyRef = {
     val name = columnRef.columnName
     val value = data.getRaw(columnRef.cqlValueName)
-    checkNotNull(tryConvert(value, converter, name), name)
+    checkNotNull(tryConvert(value, converter, () => name), () => name)
   }
 
   /** Converters for converting each of the constructor parameters */
@@ -200,8 +202,9 @@ private[connector] class GettableDataToMappedTypeConverter[T : TypeTag : ColumnM
     val ref = columnMap.constructor(i)
     val converter = ctorParamConverters(i)
     val value = data.getRaw(i)
-    val name = i.toString
-    checkNotNull(tryConvert(value, converter, name), name)
+    // i.toString is quite expensive and we only use it in case of errors so I've changed
+    // it into a lambda that only gets called if needed
+    checkNotNull(tryConvert(value, converter, () => i.toString), () => i.toString)
   }
 
   /** Evaluates the argument to be passed to the given setter of type `T`, based on given input data.
@@ -222,14 +225,22 @@ private[connector] class GettableDataToMappedTypeConverter[T : TypeTag : ColumnM
 
   /** Fills buffer with converted constructor arguments */
   private def fillBuffer(data: GettableData, buf: Array[AnyRef]): Unit = {
-    for (i <- buf.indices)
+    // for performance reasons here we should avail slow for loops
+    var i = 0
+    while (i < buf.length) {
       buf(i) = ctorParamValue(i, data)
+      i += 1
+    }
   }
 
   /** Fills buffer with converted constructor arguments */
   private def fillBuffer(data: GettableByIndexData, buf: Array[AnyRef]): Unit = {
-    for (i <- buf.indices)
+    // for performance reasons here we should avail slow for loops
+    var i = 0
+    while (i < buf.length) {
       buf(i) = ctorParamValue(i, data)
+      i += 1
+    }
   }
 
 

@@ -1,7 +1,8 @@
 package com.datastax.spark.connector.rdd.reader
 
-import com.datastax.driver.core.Row
-import com.datastax.spark.connector.GettableData
+import com.datastax.driver.core.{TypeCodec, Row}
+import com.datastax.spark.connector.{ColumnRef, GettableData}
+import com.datastax.spark.connector.cql.TableDef
 import com.datastax.spark.connector.types.TypeConverter
 
 import scala.reflect.ClassTag
@@ -14,6 +15,12 @@ trait FunctionBasedRowReader[R] extends RowReader[R] with ThisRowReaderAsFactory
   def ct: ClassTag[R]
   override val targetClass: Class[R] = ct.runtimeClass.asInstanceOf[Class[R]]
   override def neededColumns = None
+
+  override def read(row: Row, columnNames: Array[String], codecs: Array[TypeCodec[AnyRef]]): R = {
+    read(row, columnNames)
+  }
+
+  def read(row: Row, columnNames: Array[String]): R
 }
 
 class FunctionBasedRowReader1[R, A0](f: A0 => R)(

@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 import scala.collection.JavaConversions._
 
-import com.datastax.driver.core.{Row, UDTValue => DriverUDTValue, TupleValue => DriverTupleValue}
+import com.datastax.driver.core.{UDTValue => DriverUDTValue, TupleValue => DriverTupleValue, TypeCodec, Row}
 import com.datastax.spark.connector.types.TypeConverter.StringConverter
 import com.datastax.spark.connector.util.ByteBufferUtil
 
@@ -89,6 +89,14 @@ object GettableData {
     * If the field is null, returns null (not Scala Option). */
   def get(row: Row, index: Int): AnyRef = {
     val data = row.getObject(index)
+    if (data != null)
+      convert(data)
+    else
+      null
+  }
+
+  def get(row: Row, index: Int, codec: TypeCodec[AnyRef]): AnyRef = {
+    val data = row.get(index, codec)
     if (data != null)
       convert(data)
     else

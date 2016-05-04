@@ -1,6 +1,6 @@
 package com.datastax.spark.connector.japi
 
-import com.datastax.driver.core.Row
+import com.datastax.driver.core.{TypeCodec, Row}
 import com.datastax.spark.connector.GettableData
 
 final class CassandraRow(val columnNames: IndexedSeq[String], val columnValues: IndexedSeq[AnyRef])
@@ -31,6 +31,15 @@ object CassandraRow {
     val data = new Array[Object](columnNames.length)
     for (i <- columnNames.indices)
       data(i) = GettableData.get(row, i)
+    new CassandraRow(columnNames, data)
+  }
+
+  def fromJavaDriverRow(row: Row,
+                        columnNames: Array[String],
+                        codecs: Array[TypeCodec[AnyRef]]): CassandraRow = {
+    val data = new Array[Object](columnNames.length)
+    for (i <- columnNames.indices)
+      data(i) = GettableData.get(row, i, codecs(i))
     new CassandraRow(columnNames, data)
   }
 

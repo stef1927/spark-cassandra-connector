@@ -269,7 +269,7 @@ class CassandraTableScanRDD[R] private[connector](
     (queryTemplate, queryParamValues)
   }
 
-  private def createStatement(session: Session, cql: String, values: Any*): Statement = {
+  private def createStatement(session: Session, cql: String, values: Any*): BoundStatement = {
     try {
       val stmt = session.prepare(cql)
       stmt.setConsistencyLevel(consistencyLevel)
@@ -289,6 +289,20 @@ class CassandraTableScanRDD[R] private[connector](
     }
   }
 
+  private def convertRows(iterator: Iterator[Row],
+                          session: Session): Iterator[R] = {
+    val firstRow = iterator.next()
+    val columnDefs = firstRow.getColumnDefinitions
+    val columnNamesArray = columnDefs.iterator.map(_.getName).toArray
+    val codecRegistry = session.getCluster.getConfiguration.getCodecRegistry
+    val codecsArray = columnDefs.iterator
+      .map(_.getType)
+      .map(t => codecRegistry.codecFor[AnyRef](t))
+      .toArray
+
+    (Seq(firstRow).iterator ++ iterator).map(rowReader.read(_, columnNamesArray, codecsArray))
+  }
+
   private def fetchTokenRange(
     session: Session,
     range: CqlTokenRange[_, _],
@@ -302,27 +316,26 @@ class CassandraTableScanRDD[R] private[connector](
         s"with params ${values.mkString("[", ",", "]")} " +
         s"with streaming set to $streamingEnabled")
     val stmt = createStatement(session, cql, values: _*)
-    val columnNamesArray = selectedColumnRefs.map(_.selectedAs).toArray
+    stmt.setRoutingTokenRange(range.routing(session.getCluster.getMetadata))
 
     try {
       val iterator =
         if (streamingEnabled) {
-          //we should really set the routing token range also when streaming is disabled
-          //but I wanted to verify I could get the results as in the first run of tests
-          //note that spark doesn't necessarily send jobs to the preferred location so
-          //when we are not streaming we don't necessarily contact the right replicas
-          //since we have no partition key for token queries
-          stmt.setRoutingTokenRange(range.routing(session.getCluster.getMetadata))
           new StreamingResultSetIterator(session.stream(stmt))
         }
         else {
           new PrefetchingResultSetIterator(session.execute(stmt), fetchSize)
         }
 
-      val iteratorWithMetrics = iterator.map(inputMetricsUpdater.updateMetrics)
-      val result = iteratorWithMetrics.map(rowReader.read(_, columnNamesArray))
-      logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained successfully.")
-      result
+      if (iterator.isEmpty) {
+        logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained empty.")
+        Seq[R]().iterator
+      }
+      else {
+        val iteratorWithMetrics = iterator.map(inputMetricsUpdater.updateMetrics)
+        logDebug(s"Row iterator for range ${range.cql(partitionKeyStr)} obtained successfully.")
+        convertRows(iteratorWithMetrics, session)
+      }
     } catch {
       case t: Throwable =>
         throw new IOException(s"Exception during execution of $cql: ${t.getMessage}", t)

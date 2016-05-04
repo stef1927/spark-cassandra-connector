@@ -5,8 +5,7 @@ import java.sql.Timestamp
 import java.util.{UUID, Date}
 import java.math.BigInteger
 
-import com.datastax.driver.core.Row
-import com.datastax.driver.core.LocalDate
+import com.datastax.driver.core.{TypeCodec, Row, LocalDate}
 import com.datastax.spark.connector.{TupleValue, UDTValue, GettableData}
 import com.datastax.spark.connector.rdd.reader.{ThisRowReaderAsFactory, RowReader}
 import com.datastax.spark.connector.types.TypeConverter
@@ -56,19 +55,24 @@ object CassandraSQLRow {
   lazy val defaultTimeZone = java.util.TimeZone.getDefault
   def subtractTimeZoneOffset( millis: Long ) = millis - defaultTimeZone.getOffset(millis)
 
-  def fromJavaDriverRow(row: Row, columnNames: Array[String]): CassandraSQLRow = {
+  def fromJavaDriverRow(row: Row,
+                        columnNames: Array[String],
+                        codecs: Array[TypeCodec[AnyRef]]): CassandraSQLRow = {
     val data = new Array[Object](columnNames.length)
     for (i <- columnNames.indices) {
-      data(i) = GettableData.get(row, i)
+      data(i) = GettableData.get(row, i, codecs(i))
       data.update(i, toSparkSqlType(data(i)))
     }
     new CassandraSQLRow(columnNames, data)
   }
 
-  implicit object CassandraSQLRowReader extends RowReader[CassandraSQLRow] with ThisRowReaderAsFactory[CassandraSQLRow] {
+  implicit object CassandraSQLRowReader extends RowReader[CassandraSQLRow]
+    with ThisRowReaderAsFactory[CassandraSQLRow] {
 
-    override def read(row: Row, columnNames: Array[String]): CassandraSQLRow =
-      fromJavaDriverRow(row, columnNames)
+    override def read(row: Row,
+                      columnNames: Array[String],
+                      codecs: Array[TypeCodec[AnyRef]]): CassandraSQLRow =
+      fromJavaDriverRow(row, columnNames, codecs)
 
     override def neededColumns = None
     override def targetClass = classOf[CassandraSQLRow]
