@@ -324,6 +324,7 @@ class CassandraTableScanRDD[R] private[connector](
           new StreamingResultSetIterator(session.stream(stmt))
         }
         else {
+          stmt.optimizeQuery(true);
           new PrefetchingResultSetIterator(session.execute(stmt), fetchSize)
         }
 
