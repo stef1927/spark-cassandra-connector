@@ -3,8 +3,9 @@ package com.datastax.spark.connector.rdd.reader
 import java.util.concurrent.TimeUnit
 
 import com.codahale.metrics.Timer
-import com.datastax.driver.core.{Row, ResultSet}
-import com.google.common.util.concurrent.{ListenableFuture, FutureCallback, Futures}
+import com.datastax.driver.core.{ResultSet, Row}
+import com.datastax.spark.connector.CassandraRowMetadata
+import com.google.common.util.concurrent.{FutureCallback, Futures, ListenableFuture}
 
 /** Allows to efficiently iterate over a large, paged ResultSet,
   * asynchronously prefetching the next page.
@@ -14,11 +15,13 @@ import com.google.common.util.concurrent.{ListenableFuture, FutureCallback, Futu
   *                           initiates fetching the next page
   * @param timer a Codahale timer to optionally gather the metrics of fetching time
   */
-class PrefetchingResultSetIterator(_resultSet: ResultSet,
+class PrefetchingResultSetIterator(columnNames: IndexedSeq[String],
+                                   _resultSet: ResultSet,
                                    prefetchWindowSize: Int,
-                                   timer: Option[Timer] = None) extends Iterator[Row] with WithResultSet {
+                                   timer: Option[Timer] = None) extends Iterator[Row] with WithMetadata {
 
   private[this] val iterator = _resultSet.iterator()
+  private lazy val _metadata = CassandraRowMetadata.fromResultSet(columnNames, _resultSet)
 
   override def hasNext: Boolean = iterator.hasNext
 
@@ -43,5 +46,5 @@ class PrefetchingResultSetIterator(_resultSet: ResultSet,
     iterator.next()
   }
 
-  override def resultSet: Option[ResultSet] = Some(_resultSet)
+  override def metadata: CassandraRowMetadata = _metadata
 }

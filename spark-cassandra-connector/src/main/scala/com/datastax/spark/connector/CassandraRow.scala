@@ -123,9 +123,13 @@ case class CassandraRowMetadata(columnNames: IndexedSeq[String],
 
 object CassandraRowMetadata {
 
-  def fromResultSet(columnNames: IndexedSeq[String], rs: ResultSet) = {
+  def fromResultSet(columnNames: IndexedSeq[String], rs: ResultSet) : CassandraRowMetadata =
+    fromColumnDefs(columnNames, rs.getColumnDefinitions)
+
+  def fromColumnDefs(columnNames: IndexedSeq[String], _columnDefs: ColumnDefinitions)
+  : CassandraRowMetadata = {
     import scala.collection.JavaConversions._
-    val columnDefs = rs.getColumnDefinitions.asList().toList
+    val columnDefs = _columnDefs.asList().toList
     val rsColumnNames = columnDefs.map(_.getName)
     val codecs = columnDefs.map(col => CodecRegistry.DEFAULT_INSTANCE.codecFor(col.getType))
       .asInstanceOf[List[TypeCodec[AnyRef]]]
