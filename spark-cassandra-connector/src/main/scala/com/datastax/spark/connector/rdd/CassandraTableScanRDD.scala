@@ -334,7 +334,23 @@ class CassandraTableScanRDD[R] private[connector](
     }
   }
 
-  private lazy val session = connector.openSession()
+  // TODO - work out when to close the session and how many spark executor threads there are
+  // There is a considerable performance impact by creating a new session per partition, which
+  // increases with the number of partitions handled by the RDD, so we should really keep the
+  // session open until all partitions are processed
+  private lazy val session = {
+    if (readConf.asyncPagingEnabled) {
+      // this should be the number of executor threads in spark, by default there is only 1 connection
+      // per host with protocol version >= 3 because the server can handle many requests per connection
+      // the problem with the async approach is that there is a bounded queue that limits the number
+      // of requests the server can send to the client, so the spark consumers are interfering with each
+      // other if they are too slow, it is therefore better to have a dedicated connection per consumer thread
+      // since each Netty connection is single threaded
+      connector.setMaxConnectionsPerHost(4)
+    }
+
+    connector.openSession()
+  }
 
   override def compute(split: Partition, context: TaskContext): Iterator[R] = {
     val partition = split.asInstanceOf[CassandraPartition[_, _]]

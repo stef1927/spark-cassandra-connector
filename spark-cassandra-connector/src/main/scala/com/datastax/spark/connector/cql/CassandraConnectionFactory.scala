@@ -32,6 +32,21 @@ object DefaultConnectionFactory extends CassandraConnectionFactory {
       .setConnectTimeoutMillis(conf.connectTimeoutMillis)
       .setReadTimeoutMillis(conf.readTimeoutMillis)
 
+    val pools: PoolingOptions = new PoolingOptions()
+      //.setNewConnectionThreshold(HostDistance.LOCAL, concurrency)
+
+    if (conf.maxConnectionsPerHost != PoolingOptions.UNSET) {
+      pools.setCoreConnectionsPerHost(HostDistance.LOCAL, conf.maxConnectionsPerHost)
+           .setMaxConnectionsPerHost(HostDistance.LOCAL, conf.maxConnectionsPerHost)
+           .setCoreConnectionsPerHost(HostDistance.REMOTE, conf.maxConnectionsPerHost)
+           .setMaxConnectionsPerHost(HostDistance.REMOTE, conf.maxConnectionsPerHost)
+    }
+
+    if (conf.maxRequestsPerConnection != PoolingOptions.UNSET) {
+      pools.setMaxRequestsPerConnection(HostDistance.LOCAL, conf.maxRequestsPerConnection)
+           .setMaxRequestsPerConnection(HostDistance.REMOTE, conf.maxRequestsPerConnection)
+    }
+
     val builder = Cluster.builder()
       .addContactPoints(conf.hosts.toSeq: _*)
       .withPort(conf.port)
@@ -44,6 +59,7 @@ object DefaultConnectionFactory extends CassandraConnectionFactory {
       .withAuthProvider(conf.authConf.authProvider)
       .withSocketOptions(options)
       .withCompression(conf.compression)
+      .withPoolingOptions(pools)
       .withQueryOptions(
         new QueryOptions()
           .setRefreshNodeIntervalMillis(0)

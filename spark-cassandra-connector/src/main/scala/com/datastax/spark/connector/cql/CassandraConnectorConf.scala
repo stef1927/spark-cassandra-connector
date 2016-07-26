@@ -6,11 +6,9 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.util.Try
 import scala.util.control.NonFatal
-
 import org.apache.spark.{Logging, SparkConf}
-
-import com.datastax.driver.core.ProtocolOptions
-import com.datastax.spark.connector.util.{ConfigParameter, ConfigCheck}
+import com.datastax.driver.core.{PoolingOptions, ProtocolOptions}
+import com.datastax.spark.connector.util.{ConfigCheck, ConfigParameter}
 
 /** Stores configuration of a connection to Cassandra.
   * Provides information about cluster nodes, ports and optional credentials for authentication. */
@@ -29,7 +27,9 @@ case class CassandraConnectorConf(
   connectionFactory: CassandraConnectionFactory = DefaultConnectionFactory,
   cassandraSSLConf: CassandraConnectorConf.CassandraSSLConf = CassandraConnectorConf.DefaultCassandraSSLConf,
   @deprecated("delayed retrying has been disabled; see SPARKC-360", "1.2.6, 1.3.2, 1.4.3, 1.5.1")
-  queryRetryDelay: CassandraConnectorConf.RetryDelayConf = CassandraConnectorConf.QueryRetryDelayParam.default
+  queryRetryDelay: CassandraConnectorConf.RetryDelayConf = CassandraConnectorConf.QueryRetryDelayParam.default,
+  maxConnectionsPerHost: Int = CassandraConnectorConf.MaxConnectionsPerHost.default,
+  maxRequestsPerConnection: Int = CassandraConnectorConf.MaxRequestsPerConnection.default
 )
 
 /** A factory for [[CassandraConnectorConf]] objects.
@@ -222,6 +222,18 @@ object CassandraConnectorConf extends Logging {
     default = DefaultCassandraSSLConf.enabledAlgorithms,
     description = """SSL cipher suites""")
 
+  val MaxConnectionsPerHost = ConfigParameter[Int](
+    name = "spark.cassandra.connection.max_connections_per_host",
+    section = ReferenceSection,
+    default = PoolingOptions.UNSET,
+    description = """Maximum number of connections per host, local or remote""")
+
+  val MaxRequestsPerConnection = ConfigParameter[Int](
+    name = "spark.cassandra.connection.max_requests_per_connection",
+    section = ReferenceSection,
+    default = PoolingOptions.UNSET,
+    description = """Maximum number of in flight requests per connection""")
+
   //Whitelist for allowed CassandraConnector environment variables
   val Properties: Set[ConfigParameter[_]] = Set(
     ConnectionHostParam,
@@ -240,7 +252,9 @@ object CassandraConnectorConf extends Logging {
     SSLTrustStorePathParam,
     SSLTrustStorePasswordParam,
     SSLProtocolParam,
-    SSLEnabledAlgorithmsParam
+    SSLEnabledAlgorithmsParam,
+    MaxConnectionsPerHost,
+    MaxRequestsPerConnection
   )
 
   private def resolveHost(hostName: String): Option[InetAddress] = {
@@ -284,6 +298,9 @@ object CassandraConnectorConf extends Logging {
     val sslEnabledAlgorithms = conf.getOption(SSLEnabledAlgorithmsParam.name)
       .map(_.split(",").map(_.trim).toSet).getOrElse(SSLEnabledAlgorithmsParam.default)
 
+    val maxConnectionsPerHost = conf.getInt(MaxConnectionsPerHost.name, MaxConnectionsPerHost.default)
+    val maxRequestsPerConnection = conf.getInt(MaxRequestsPerConnection.name, MaxRequestsPerConnection.default)
+
     val cassandraSSLConf = CassandraSSLConf(
       enabled = sslEnabled,
       trustStorePath = sslTrustStorePath,
@@ -306,7 +323,9 @@ object CassandraConnectorConf extends Logging {
       connectTimeoutMillis = connectTimeout,
       readTimeoutMillis = readTimeout,
       connectionFactory = connectionFactory,
-      cassandraSSLConf = cassandraSSLConf
+      cassandraSSLConf = cassandraSSLConf,
+      maxConnectionsPerHost = maxConnectionsPerHost,
+      maxRequestsPerConnection = maxRequestsPerConnection
     )
   }
 }
