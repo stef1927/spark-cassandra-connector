@@ -72,10 +72,6 @@ class CassandraConnector(conf: CassandraConnectorConf)
   /** Connection configurator */
   def connectionFactory = _config.connectionFactory
 
-  def setMaxConnectionsPerHost(max: Int): Unit = _config = _config.copy(maxConnectionsPerHost = max)
-
-  def setMaxRequestsPerConnection(max: Int): Unit = _config = _config.copy(maxRequestsPerConnection = max)
-
   /** Returns a shared session to Cassandra and increases the internal open
     * reference counter. It does not release the session automatically,
     * so please remember to close it after use. Closing a shared session
